@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import stripJsonComments from './helpers';
+import stripJsonComments, { toBodyObj } from './helpers';
 
 export class ElasticItem {
     public Range!: vscode.Range;
@@ -74,11 +74,14 @@ export class ElasticMatch {
         this.Body.Text = jsonText;
 
         try {
-            JSON.parse(stripJsonComments(jsonText));
+            const bodyStr = stripJsonComments(jsonText);
+            const bodyObj = toBodyObj(bodyStr);
+            if(bodyObj === undefined) {
+                throw new Error('failed to parse json, Position 0');
+            }
             this.HasBody = true;
             this.Range = new vscode.Range(this.Method.Range.start, this.Body.Range.end);
         } catch (error: any) {
-            // console.error(error.message)
             this.HasBody = false;
             this.Range = new vscode.Range(this.Method.Range.start, this.Path.Range.end);
             this.Error = this.GetErrorFromMessage(txt, error.message);

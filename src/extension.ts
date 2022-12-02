@@ -10,7 +10,7 @@ import { ElasticMatch } from './ElasticMatch';
 import { ElasticMatches } from './ElasticMatches';
 import { AxiosError, AxiosResponse } from 'axios';
 import axiosInstance from './axiosInstance';
-import stripJsonComments from './helpers';
+import stripJsonComments, { toBodyObj } from './helpers';
 
 export async function activate(context: vscode.ExtensionContext) {
     getHost(context);
@@ -149,13 +149,14 @@ export async function executeQuery(context: vscode.ExtensionContext, resultsProv
 
     let response: any;
     try {
-        const body = stripJsonComments(em.Body.Text);
+        const bodyStr = stripJsonComments(em.Body.Text);
+        const bodyObj = toBodyObj(bodyStr);
         response = await axiosInstance
             .request({
                 method: em.Method.Text as any,
                 baseURL: host,
                 url: em.Path.Text.startsWith('/') ? `${host}${em.Path.Text}` : em.Path.Text,
-                data: !body ? undefined : body,
+                data: bodyObj ? JSON.stringify(bodyObj, undefined, 4) : undefined,
             })
             .catch(error => error as AxiosError<any, any>);
     } catch (error) {
