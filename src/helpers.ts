@@ -75,3 +75,19 @@ export default function stripJsonComments(jsonString: string, { whitespace = tru
 
     return result + (isInsideComment ? strip(jsonString.slice(offset)) : jsonString.slice(offset));
 }
+
+export function toBodyObj(str: string) {
+    try {
+        return JSON.parse(str);
+    } catch (e) {}
+    let obj = undefined;
+    try {
+        obj = eval(`(${str})`);
+        if (typeof obj === 'object' && obj !== undefined) {
+            return obj;
+        }
+    } catch (error) {
+        console.log(error);
+    }
+    return undefined;
+}

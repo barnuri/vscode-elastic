@@ -2,6 +2,7 @@
     "version": "2.0.0",
     "tasks": [
         {
+            
             "type": "npm",
             "script": "watch",
             "problemMatcher": ["$ts-webpack-watch", "$tslint-webpack-watch"],
