@@ -46,9 +46,3 @@ PUT /my-index
 ## Keymaps
 
 -   **Alt + Enter** / **Ctrl + Enter** to execute selected query.
-
-## Roadmap
-
--   Work with multi host
--   User Authentication
--   IntelliSense like kibana autocomplete
