@@ -12,6 +12,8 @@ import { AxiosError, AxiosResponse } from 'axios';
 import axiosInstance from './axiosInstance';
 import stripJsonComments, { toBodyObj } from './helpers';
 
+let panel: vscode.WebviewPanel | undefined;
+
 export async function activate(context: vscode.ExtensionContext) {
     getHost(context);
     const languages = ['es', 'elasticsearch'];
@@ -100,13 +102,10 @@ export async function activate(context: vscode.ExtensionContext) {
             try {
                 let l = em.Method.Range.start.line + 1;
                 const editor = vscode.window.activeTextEditor;
-                const config = vscode.workspace.getConfiguration('editor');
-                const tabSize = +(config.get('tabSize') as number);
-
                 editor!.edit(editBuilder => {
                     if (em.HasBody) {
-                        let txt = editor!.document.getText(em.Body.Range);
-                        editBuilder.replace(em.Body.Range, JSON.stringify(JSON.parse(em.Body.Text), null, tabSize));
+                        const bodyObj = toBodyObj(em.Body.Text);
+                        editBuilder.replace(em.Body.Range, JSON.stringify(bodyObj, undefined, 4));
                     }
                 });
             } catch (error: any) {
@@ -136,78 +135,82 @@ export async function executeQuery(context: vscode.ExtensionContext, resultsProv
     const host = getHost(context);
     const startTime = new Date().getTime();
 
-    const config = vscode.workspace.getConfiguration();
-    var asDocument = config.get('elasticsearch.showResultAsDocument');
-    if (!asDocument) {
-        vscode.commands.executeCommand('vscode.previewHtml', resultsProvider.contentUri, vscode.ViewColumn.Two, 'ElasticSearch Query');
-        resultsProvider.update(context, host, '', startTime, 0, 'Executing query ...');
-    }
-
     const sbi = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
     sbi.text = '$(search) Executing query ...';
     sbi.show();
 
-    let response: any;
-    try {
-        const bodyStr = stripJsonComments(em.Body.Text);
-        const bodyObj = toBodyObj(bodyStr);
-        response = await axiosInstance
-            .request({
-                method: em.Method.Text as any,
-                baseURL: host,
-                url: em.Path.Text.startsWith('/') ? `${host}${em.Path.Text}` : em.Path.Text,
-                data: bodyObj ? JSON.stringify(bodyObj, undefined, 4) : undefined,
-            })
-            .catch(error => error as AxiosError<any, any>);
-    } catch (error) {
-        response = error;
-    }
+    const bodyStr = stripJsonComments(em.Body.Text);
+    const bodyObj = toBodyObj(bodyStr);
+
+    const response = await axiosInstance
+        .request({
+            method: em.Method.Text as any,
+            baseURL: host,
+            url: em.Path.Text.startsWith('/') ? `${host}${em.Path.Text}` : em.Path.Text,
+            data: bodyObj ? JSON.stringify(bodyObj, undefined, 4) : undefined,
+        })
+        .catch(error => error as AxiosError<any, any>);
 
     sbi.dispose();
-    const endTime = new Date().getTime();
-    const error = response as AxiosError;
-    const data = response as AxiosResponse<any>;
-
-    let results = data.data;
-    if (asDocument) {
-        try {
-            const config = vscode.workspace.getConfiguration('editor');
-            const tabSize = +(config.get('tabSize') as number);
-            results = JSON.stringify(error.isAxiosError ? error.response?.data : data.data, null, tabSize);
-        } catch (error: any) {
-            results = data.data || error.response?.data || error.message;
-        }
-        showResult(results, vscode.window.activeTextEditor!.viewColumn! + 1);
+    const goodResponse = response as AxiosResponse<any, any>;
+    const badResponse = response as AxiosError<any, any>;
+    let results: any = '';
+    if (badResponse?.isAxiosError || goodResponse.status >= 300) {
+        results = goodResponse.data ? goodResponse.data : badResponse;
     } else {
-        resultsProvider.update(context, host, results, endTime - startTime, data.status, data.statusText);
-        vscode.commands.executeCommand('vscode.previewHtml', resultsProvider.contentUri, vscode.ViewColumn.Two, 'ElasticSearch Results');
+        results = goodResponse.data;
     }
+    if (typeof results == 'object') {
+        results = JSON.stringify(results, undefined, 4);
+    }
+    const endTime = new Date().getTime();
+    results = `// ${new Date().toISOString()} - took ${(endTime - startTime) / 1000} secs\n` + results;
+    showResult(results);
 }
 
-function showResult(result: string, column?: vscode.ViewColumn): Thenable<void> {
-    const tempResultFilePath = path.join(os.homedir(), '.vscode-elastic');
-    const resultFilePath = vscode.workspace.rootPath || tempResultFilePath;
-
-    let uri = vscode.Uri.file(path.join(resultFilePath, 'result.json'));
-    if (!fs.existsSync(uri.fsPath)) {
-        uri = uri.with({ scheme: 'untitled' });
-    }
-    return vscode.workspace
-        .openTextDocument(uri)
-        .then(textDocument =>
-            vscode.window.showTextDocument(textDocument, column ? (column > vscode.ViewColumn.Three ? vscode.ViewColumn.One : column) : undefined, true),
-        )
-        .then(editor => {
-            editor.edit(editorBuilder => {
-                if (editor.document.lineCount > 0) {
-                    const lastLine = editor.document.lineAt(editor.document.lineCount - 1);
-                    editorBuilder.delete(
-                        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(lastLine.range.start.line, lastLine.range.end.character)),
-                    );
-                }
-                editorBuilder.insert(new vscode.Position(0, 0), result);
-            });
+async function showResult(results: string) {
+    const column = vscode.window.activeTextEditor!.viewColumn! + 1;
+    const config = vscode.workspace.getConfiguration();
+    var asDocument = config.get('elasticsearch.showResultAsDocument', true);
+    if (asDocument) {
+        const resultFilePath = vscode.workspace.rootPath || path.join(os.homedir(), '.vscode-elastic');
+        let uri = vscode.Uri.file(path.join(resultFilePath, 'ElasticSearchResult.json'));
+        if (!fs.existsSync(uri.fsPath)) {
+            uri = uri.with({ scheme: 'untitled' });
+        }
+        const textDocument = await vscode.workspace.openTextDocument(uri);
+        const editor = await vscode.window.showTextDocument(
+            textDocument,
+            column ? (column > vscode.ViewColumn.Three ? vscode.ViewColumn.One : column) : undefined,
+            true,
+        );
+        editor.edit(editorBuilder => {
+            if (editor.document.lineCount > 0) {
+                const lastLine = editor.document.lineAt(editor.document.lineCount - 1);
+                editorBuilder.delete(new vscode.Range(new vscode.Position(0, 0), new vscode.Position(lastLine.range.start.line, lastLine.range.end.character)));
+            }
+            editorBuilder.insert(new vscode.Position(0, 0), results);
         });
+        return;
+    }
+
+    if (!panel) {
+        panel = vscode.window.createWebviewPanel('annotator-annotation', 'ElasticSearchResult', column, { enableScripts: true });
+        panel.onDidDispose(() => {
+            panel = undefined;
+        });
+    }
+    panel.webview.html = `
+<html>
+    <body>
+        <pre>
+            <code>
+${results}
+            </code>
+        </pre>
+    </body>
+</html>`;
+    panel.iconPath = vscode.Uri.parse('https://github.com/barnuri/vscode-elasticsearch/blob/master/media/elastic.png?raw=true');
 }
 
 // this method is called when your extension is deactivated

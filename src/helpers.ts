@@ -82,10 +82,12 @@ export function toBodyObj(str: string) {
     } catch (e) {}
     let obj = undefined;
     try {
-        obj = eval(str);
+        obj = eval(`(${str})`);
         if (typeof obj === 'object' && obj !== undefined) {
             return obj;
         }
-    } catch {}
+    } catch (error) {
+        console.log(error);
+    }
     return undefined;
 }
