@@ -15,7 +15,7 @@ jobs:
         uses: actions/setup-node@v1
         with:
           node-version: 16.x
-      - run: npm i
+      - run: yarn
 
       - name: Publish
         run: npm run deploy
